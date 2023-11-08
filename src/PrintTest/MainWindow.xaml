@@ -10,7 +10,10 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Button Grid.Row="0" Click="OnPrintClick">Print</Button>
-        <Canvas Name="Canvas" Grid.Row="1">
+        <Canvas
+            Name="Canvas"
+            Grid.Row="1"
+            Background="White">
             <TextBlock
                 Canvas.Left="65"
                 Canvas.Top="51"
