@@ -1,59 +1,67 @@
 using System.ComponentModel;
 using System.IO;
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.IO.Packaging;
 using System.Linq;
+using System.Printing;
 using System.Runtime.InteropServices;
-using System.Windows.Controls;
+using System.Windows;
 using System.Windows.Xps.Packaging;
+using Microsoft.Win32;
 
 namespace PrintTest;
 
 public partial class MainWindow
 {
+    private const string MicrosoftPrintToPdf = "Microsoft Print to PDF";
+
     public MainWindow()
     {
         InitializeComponent();
     }
 
-    private void OnPrintClick(object sender, System.Windows.RoutedEventArgs e)
+    private void OnPrintClick(object sender, RoutedEventArgs e)
     {
-        var fileDialog = new Microsoft.Win32.SaveFileDialog();
-        fileDialog.Filter = "PDF|*.pdf";
-        fileDialog.FileName = $"pdf_{DateTime.Now:yy-MM-dd_HH-mm-ss_fff}.pdf";
-
-        if (fileDialog.ShowDialog(this) != true)
+        var fileDialog = new SaveFileDialog
         {
+            Filter = "PDF|*.pdf",
+            FileName = $"pdf_{DateTime.Now:yy-MM-dd_HH-mm-ss_fff}.pdf"
+        };
+
+        if (fileDialog.ShowDialog(this) is false)
             return;
-        }
 
         var filePath = fileDialog.FileName;
-        var desctiption = "A Simple Drawing";
 
-        var svr = new System.Printing.LocalPrintServer();
-        var queue = svr.GetPrintQueues().FirstOrDefault(_ => _.Name == "Microsoft Print to PDF");
-        if (queue == null)
-        {
+        using var svr = new LocalPrintServer();
+        using var queue = svr.GetPrintQueues()
+            .FirstOrDefault(queue => queue.Name == MicrosoftPrintToPdf);
+        if (queue is null)
             return;
-        }
 
         var ticket = queue.DefaultPrintTicket;
 
-        var streamXPS = new MemoryStream();
-        using (var pack = Package.Open(streamXPS, FileMode.CreateNew))
+        using var streamXps = new MemoryStream();
+        using (var pack = Package.Open(streamXps, FileMode.CreateNew))
         {
             using var doc = new XpsDocument(pack, CompressionOption.SuperFast);
             var writer = XpsDocument.CreateXpsDocumentWriter(doc);
             writer.Write(Canvas, ticket); //PrintVisual
         }
-        streamXPS.Position = 0;
+        streamXps.Position = 0;
 
         //https://social.msdn.microsoft.com/Forums/vstudio/ja-JP/bbc1f202-b73a-4da7-839b-6945c020e9db/#answers
-        XpsPrintHelper.Print(streamXPS, queue.Name, desctiption, false, filePath);
+        XpsPrintHelper.Print(streamXps, queue.Name, "Print to PDF Job", false, filePath);
     }
 }
 
-public class XpsPrintHelper
+[SuppressMessage(
+    "CodeQuality",
+    "IDE0079:Remove unnecessary suppression",
+    Justification = "<Pending>"
+)]
+public static class XpsPrintHelper
 {
     public static void Print(
         Stream stream,
@@ -61,12 +69,12 @@ public class XpsPrintHelper
         string jobName,
         bool isWait,
         string outputFileName
-    ) //ファイル名
+    )
     {
-        if (stream == null)
-            throw new ArgumentNullException("stream");
-        if (printerName == null)
-            throw new ArgumentNullException("printerName");
+        if (stream is null)
+            throw new ArgumentNullException(nameof(stream));
+        if (printerName is null)
+            throw new ArgumentNullException(nameof(printerName));
 
         var completionEvent = CreateEvent(IntPtr.Zero, true, false, null);
         if (completionEvent == IntPtr.Zero)
@@ -81,7 +89,7 @@ public class XpsPrintHelper
                 out var job,
                 out var jobStream,
                 outputFileName
-            ); //ファイル名
+            );
 
             CopyJob(stream, job, jobStream);
 
@@ -105,13 +113,12 @@ public class XpsPrintHelper
         out IXpsPrintJob job,
         out IXpsPrintJobStream jobStream,
         string outputFileName
-    ) //ファイル名
+    )
     {
         var result = StartXpsPrintJob(
             printerName,
             jobName,
-            outputFileName //ファイル名
-            ,
+            outputFileName,
             IntPtr.Zero,
             completionEvent,
             null,
@@ -154,13 +161,13 @@ public class XpsPrintHelper
 
     private static void WaitForJob(IntPtr completionEvent)
     {
-        const int INFINITE = -1;
-        switch (WaitForSingleObject(completionEvent, INFINITE))
+        const int infinite = -1;
+        switch (WaitForSingleObject(completionEvent, infinite))
         {
-            case WAIT_RESULT.WAIT_OBJECT_0:
+            case WaitResult.WaitObject0:
                 // Expected result, do nothing.
                 break;
-            case WAIT_RESULT.WAIT_FAILED:
+            case WaitResult.WaitFailed:
                 throw new Win32Exception();
             default:
                 throw new Exception("Unexpected result when waiting for the print job.");
@@ -170,13 +177,13 @@ public class XpsPrintHelper
     private static void CheckJobStatus(IXpsPrintJob job)
     {
         job.GetJobStatus(out var jobStatus);
-        switch (jobStatus.completion)
+        switch (jobStatus.Completion)
         {
-            case XPS_JOB_COMPLETION.XPS_JOB_COMPLETED:
+            case XpsJobCompletion.XpsJobCompleted:
                 // Expected result, do nothing.
                 break;
-            case XPS_JOB_COMPLETION.XPS_JOB_FAILED:
-                throw new Win32Exception(jobStatus.jobStatus);
+            case XpsJobCompletion.XpsJobFailed:
+                throw new Win32Exception(jobStatus.JobStatus);
             default:
                 throw new Exception("Unexpected print job status.");
         }
@@ -189,7 +196,7 @@ public class XpsPrintHelper
         [MarshalAs(UnmanagedType.LPWStr)] string outputFileName, //こいつ
         IntPtr progressEvent, // HANDLE
         IntPtr completionEvent, // HANDLE
-        [MarshalAs(UnmanagedType.LPArray)] byte[] printablePagesOn,
+        [MarshalAs(UnmanagedType.LPArray)] byte[]? printablePagesOn,
         uint printablePagesOnCount,
         out IXpsPrintJob xpsPrintJob,
         out IXpsPrintJobStream documentStream,
@@ -201,21 +208,21 @@ public class XpsPrintHelper
         IntPtr lpEventAttributes,
         bool bManualReset,
         bool bInitialState,
-        string lpName
+        string? lpName
     );
 
     [DllImport("Kernel32.dll", SetLastError = true, ExactSpelling = true)]
-    private static extern WAIT_RESULT WaitForSingleObject(IntPtr handle, int milliseconds);
+    private static extern WaitResult WaitForSingleObject(IntPtr handle, int milliseconds);
 
     [DllImport("Kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(IntPtr hObject);
 
-    [Guid("0C733A30-2A1C-11CE-ADE5-00AA0044773D")] // This is IID of ISequenatialSteam.
+    [Guid("0C733A30-2A1C-11CE-ADE5-00AA0044773D")] // This is IID of ISequentialSteam.
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     private interface IXpsPrintJobStream
     {
-        // ISequentualStream methods.
+        // ISequentialStream methods.
         void Read([MarshalAs(UnmanagedType.LPArray)] byte[] pv, uint cb, out uint pcbRead);
         void Write([MarshalAs(UnmanagedType.LPArray)] byte[] pv, uint cb, out uint pcbWritten);
 
@@ -228,33 +235,35 @@ public class XpsPrintHelper
     private interface IXpsPrintJob
     {
         void Cancel();
-        void GetJobStatus(out XPS_JOB_STATUS jobStatus);
+        void GetJobStatus(out XpsJobStatus jobStatus);
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct XPS_JOB_STATUS
+    private struct XpsJobStatus
     {
-        public UInt32 jobId;
-        public Int32 currentDocument;
-        public Int32 currentPage;
-        public Int32 currentPageTotal;
-        public XPS_JOB_COMPLETION completion;
-        public Int32 jobStatus; // UInt32
+        public uint JobId;
+        public int CurrentDocument;
+        public int CurrentPage;
+        public int CurrentPageTotal;
+        public XpsJobCompletion Completion;
+        public int JobStatus; // UInt32
     };
 
-    private enum XPS_JOB_COMPLETION
+    [SuppressMessage("ReSharper", "UnusedMember.Local")]
+    private enum XpsJobCompletion
     {
-        XPS_JOB_IN_PROGRESS = 0,
-        XPS_JOB_COMPLETED = 1,
-        XPS_JOB_CANCELLED = 2,
-        XPS_JOB_FAILED = 3
+        XpsJobInProgress = 0,
+        XpsJobCompleted = 1,
+        XpsJobCancelled = 2,
+        XpsJobFailed = 3
     }
 
-    private enum WAIT_RESULT
+    [SuppressMessage("ReSharper", "UnusedMember.Local")]
+    private enum WaitResult
     {
-        WAIT_OBJECT_0 = 0,
-        WAIT_ABANDONED = 0x80,
-        WAIT_TIMEOUT = 0x102,
-        WAIT_FAILED = -1 // 0xFFFFFFFF
+        WaitObject0 = 0,
+        WaitAbandoned = 0x80,
+        WaitTimeout = 0x102,
+        WaitFailed = -1 // 0xFFFFFFFF
     }
 }
